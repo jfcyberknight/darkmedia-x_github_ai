@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "username": "jfcyberknight",
+  "instructions": ["AGENTS.md"],
+  "command": {
+    "dev": {
+      "description": "Start the Vite dev server",
+      "prompt": "Run `npm run dev` to start the local development server."
+    },
+    "build": {
+      "description": "Build for production",
+      "prompt": "Run `npm run build` to create a production build in dist/."
+    },
+    "lint": {
+      "description": "Run ESLint checks",
+      "prompt": "Run `npm run lint` to check for code style issues."
+    }
+  }
+}
