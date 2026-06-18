@@ -128,17 +128,22 @@ export default function App() {
     const { error } = await supabase.auth.resetPasswordForEmail(authEmail.trim(), {
       redirectTo: window.location.origin + window.location.pathname,
     })
-    if (error) notify(error.message, 'error')
-    else { setResetSent(true); notify('Email de réinitialisation envoyé.', 'success') }
+    if (error) {
+      if (error.status === 429) notify('Trop de demandes. Réessaie dans quelques minutes.', 'error')
+      else notify(error.message, 'error')
+    } else { setResetSent(true); notify('Email de réinitialisation envoyé.', 'success') }
   }
 
   async function handleUpdatePassword(event) {
     event.preventDefault()
     if (!supabase) return
     const { error } = await supabase.auth.updateUser({ password: newPassword })
-    if (error) notify(error.message, 'error')
-    else {
+    if (error) {
+      if (error.status === 429) notify('Trop de demandes. Réessaie dans quelques minutes.', 'error')
+      else notify(error.message, 'error')
+    } else {
       setPasswordRecovery(false)
+      setSettingsOpen(false)
       setNewPassword('')
       notify('Mot de passe mis à jour avec succès.', 'success')
     }
@@ -328,7 +333,7 @@ export default function App() {
     </main>
     {modalOpen && <WorkflowModal form={form} setForm={setForm} onClose={() => setModalOpen(false)} onSubmit={saveWorkflow} editing={editing} />}
     {importOpen && <ImportModal session={session} state={importState} setState={setImportState} result={importResult} setResult={setImportResult} onClose={() => setImportOpen(false)} onImport={async (s, r) => { const d = await importWorkflows(s, r); setWorkflows(prev => [...d, ...prev]); return d }} notify={notify} />}
-    {settingsOpen && <SettingsModal session={session} count={workflows.length} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsModal session={session} count={workflows.length} onClose={() => setSettingsOpen(false)} newPassword={newPassword} setNewPassword={setNewPassword} onUpdatePassword={handleUpdatePassword} />}
     {notice && <div className={`toast ${notice.type}`} role="status">{notice.type === 'error' ? <X size={17}/> : notice.type === 'info' ? <Info size={17}/> : <Check size={17}/>}<span>{notice.text}</span><button aria-label="Fermer" onClick={() => setNotice(null)}><X size={15}/></button></div>}
   </div>
 }
@@ -402,8 +407,8 @@ function WorkflowModal({ form, setForm, onClose, onSubmit, editing }) {
   </form></div>
 }
 
-function SettingsModal({ session, count, onClose }) {
-  return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><h2 id="settings-title">App Info</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header><div className="settings-content"><div className="setting-row"><span>Version</span><b>1.0.0</b></div><div className="setting-row"><span>Stockage</span><b>Supabase Cloud</b></div><div className="setting-row"><span>Session</span><b>{session ? session.user.email : 'Hors connexion'}</b></div><div className="setting-row"><span>Workflows</span><b>{count}</b></div></div></section></div>
+function SettingsModal({ session, count, onClose, newPassword, setNewPassword, onUpdatePassword }) {
+  return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><h2 id="settings-title">App Info</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header><div className="settings-content"><div className="setting-row"><span>Version</span><b>1.0.0</b></div><div className="setting-row"><span>Stockage</span><b>Supabase Cloud</b></div><div className="setting-row"><span>Session</span><b>{session ? session.user.email : 'Hors connexion'}</b></div><div className="setting-row"><span>Workflows</span><b>{count}</b></div>{session && <form onSubmit={onUpdatePassword} style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}><label style={{ color: '#a5a8c1', fontWeight: 700, fontSize: 13 }}>Changer le mot de passe<input type="password" autoComplete="new-password" minLength="6" value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="Nouveau mot de passe" required /></label><button className="primary" type="submit" style={{ width: '100%', justifyContent: 'center' }}>Mettre à jour</button></form>}</div></section></div>
 }
 
 function ImportModal({ session, state, setState, result, setResult, onClose, onImport, notify }) {
