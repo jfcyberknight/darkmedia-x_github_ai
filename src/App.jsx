@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import {
-  Bot, Check, ChevronDown, Clock3, Copy, Grid3X3, Info, LogOut,
+  Bot, Check, ChevronDown, Clock3, Copy, GitFork, Grid3X3, Info, LogOut,
   Menu, Plus, Search, Settings, Sparkles, Star, Tags, Trash2, Wand2, X,
 } from 'lucide-react'
+import { analyzeRepo } from './repoAnalyzer.js'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -23,6 +24,9 @@ export default function App() {
   const [filter, setFilter] = useState('Tous les workflows')
   const [sort, setSort] = useState('recent')
   const [modalOpen, setModalOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importState, setImportState] = useState('idle')
+  const [importResult, setImportResult] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -78,6 +82,7 @@ export default function App() {
       }
       if (event.key === 'Escape') {
         setModalOpen(false)
+        setImportOpen(false)
         setSettingsOpen(false)
         setMobileNavOpen(false)
       }
@@ -231,6 +236,7 @@ export default function App() {
           <span className="mode-pill cloud">{session.user.email}</span>
           <button className="icon" aria-label="Paramètres" onClick={() => setSettingsOpen(true)}><Settings size={18}/></button>
           <button className="icon" aria-label="Se déconnecter" onClick={signOut}><LogOut size={18}/></button>
+          <button className="icon" aria-label="Importer depuis GitHub" title="Importer depuis GitHub" onClick={() => { setImportOpen(true); setImportState('idle'); setImportResult(null) }}><GitFork size={18}/></button>
           <button className="primary" onClick={() => openModal()}><Plus size={18}/> Nouveau workflow</button>
         </div>
       </header>
@@ -253,9 +259,21 @@ export default function App() {
       {dataLoading ? <div className="empty"><Sparkles className="spin" /><h2>Chargement de tes workflows…</h2></div> : filtered.length ? <section className="grid">{filtered.map(workflow => <WorkflowCard key={workflow.id} workflow={workflow} onEdit={() => openModal(workflow)} onDelete={() => removeWorkflow(workflow)} onFavorite={() => patchWorkflow(workflow, { favorite: !workflow.favorite })} onCopy={() => copyWorkflow(workflow)} />)}</section> : <EmptyState onReset={() => { setQuery(''); setFilter('Tous les workflows') }} onCreate={() => openModal()} />}
     </main>
     {modalOpen && <WorkflowModal form={form} setForm={setForm} onClose={() => setModalOpen(false)} onSubmit={saveWorkflow} editing={editing} />}
+    {importOpen && <ImportModal session={session} state={importState} setState={setImportState} result={importResult} setResult={setImportResult} onClose={() => setImportOpen(false)} onImport={async (s, r) => { const d = await importWorkflows(s, r); setWorkflows(prev => [...d, ...prev]); return d }} notify={notify} />}
     {settingsOpen && <SettingsModal session={session} count={workflows.length} onClose={() => setSettingsOpen(false)} />}
     {notice && <div className={`toast ${notice.type}`} role="status">{notice.type === 'error' ? <X size={17}/> : notice.type === 'info' ? <Info size={17}/> : <Check size={17}/>}<span>{notice.text}</span><button aria-label="Fermer" onClick={() => setNotice(null)}><X size={15}/></button></div>}
   </div>
+}
+
+async function importWorkflows(session, repoInfo) {
+  const records = repoInfo.workflows.map(w => ({
+    title: w.title, description: w.description, content: w.content,
+    category: w.category, model: '', favorite: false,
+    tags: w.tags, user_id: session.user.id,
+  }))
+  const { data, error } = await supabase.from('workflows').insert(records).select()
+  if (error) throw error
+  return data
 }
 
 function Sidebar({ open, stats, filter, onFilter }) {
@@ -311,6 +329,70 @@ function WorkflowModal({ form, setForm, onClose, onSubmit, editing }) {
 
 function SettingsModal({ session, count, onClose }) {
   return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><h2 id="settings-title">État de l’application</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header><div className="settings-content"><div className="setting-row"><span>Stockage</span><b>Supabase Cloud</b></div><div className="setting-row"><span>Session</span><b>{session ? session.user.email : 'Hors connexion'}</b></div><div className="setting-row"><span>Workflows</span><b>{count}</b></div></div></section></div>
+}
+
+function ImportModal({ session, state, setState, result, setResult, onClose, onImport, notify }) {
+  const [url, setUrl] = useState('')
+  async function handleAnalyze(event) {
+    event.preventDefault()
+    if (!url.trim()) return
+    setState('loading')
+    try {
+      const data = await analyzeRepo(url.trim())
+      setResult(data)
+      setState('done')
+    } catch (err) {
+      notify(err.message, 'error')
+      setState('idle')
+    }
+  }
+  async function handleImportAll() {
+    if (!result) return
+    setState('saving')
+    try {
+      const saved = await onImport(session, result)
+      notify(`${saved.length} workflows importés depuis ${result.owner}/${result.repo}`)
+      setState('idle')
+      onClose()
+    } catch (err) {
+      notify(err.message, 'error')
+      setState('done')
+    }
+  }
+  return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}>
+    <section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+      <header><h2 id="import-title">Importer depuis GitHub</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header>
+      <div className="settings-content">
+        {state === 'idle' && <form onSubmit={handleAnalyze}>
+          <label style={{ display: 'block', marginBottom: 16, fontWeight: 700, fontSize: 13, color: '#a5a8c1' }}>
+            URL du dépôt GitHub
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" required style={{ marginTop: 6 }} />
+          </label>
+          <button className="primary" style={{ width: '100%', justifyContent: 'center' }}><GitFork size={17}/> Analyser le dépôt</button>
+        </form>}
+        {state === 'loading' && <div className="center" style={{ minHeight: 160 }}><Sparkles className="spin" /> Analyse du dépôt…</div>}
+        {state === 'done' && result && <>
+          <div className="setting-row"><span>Dépôt</span><b><a href={result.htmlUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8' }}>{result.owner}/{result.repo}</a></b></div>
+          {result.description && <div className="setting-row"><span>Description</span><b style={{ fontWeight: 400, textAlign: 'right', maxWidth: '60%' }}>{result.description}</b></div>}
+          <div className="setting-row"><span>Language</span><b>{result.language}</b></div>
+          {result.stacks.length > 0 && <div className="setting-row"><span>Stack détecté</span><b style={{ fontWeight: 400, maxWidth: '60%', textAlign: 'right' }}>{result.stacks.join(', ')}</b></div>}
+          <div className="setting-row"><span>Workflows générés</span><b>{result.workflows.length}</b></div>
+          <div style={{ marginTop: 16, maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {result.workflows.map((w, i) => <div key={i} style={{ background: '#11121a', border: '1px solid #303246', borderRadius: 10, padding: 12 }}>
+              <div style={{ color: '#38bdf8', fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{w.title}</div>
+              <div style={{ color: '#7e829f', fontSize: 12, marginBottom: 6 }}>{w.description}</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{w.tags.map((t, j) => <span key={j} style={{ fontSize: 11, background: '#222337', border: '1px solid #2d3048', color: '#868baf', borderRadius: 99, padding: '2px 8px' }}>#{t}</span>)}</div>
+            </div>)}
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+            <button className="secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setState('idle'); setResult(null) }}>Analyser un autre dépôt</button>
+            <button className="primary" style={{ flex: 1, justifyContent: 'center' }} onClick={handleImportAll}><Plus size={17}/> Tout importer ({result.workflows.length})</button>
+          </div>
+        </>}
+        {state === 'saving' && <div className="center" style={{ minHeight: 160 }}><Sparkles className="spin" /> Importation…</div>}
+      </div>
+    </section>
+  </div>
 }
 
 function EmptyState({ onReset, onCreate }) {
