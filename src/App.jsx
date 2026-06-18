@@ -12,27 +12,12 @@ const supabase = configured ? createClient(url, key) : null
 
 const CATEGORIES = ['Analyse', 'Automatisation', 'Code', 'Créatif', 'Débogage', 'Documentation', 'Formation', 'Général']
 const COLORS = { Analyse: '#f59e0b', Automatisation: '#8b5cf6', Code: '#10b981', Créatif: '#ec4899', Débogage: '#ef4444', Documentation: '#0ea5e9', Formation: '#14b8a6', Général: '#6366f1' }
-const STORAGE_KEY = 'darkmedia-workflows-v1'
-const DEMO_WORKFLOWS = [
-  { id: 'demo-1', title: 'Générateur de Workflow IA Multi-Étapes', description: 'Conçois un workflow complet avec objectifs, agents, entrées/sorties et critères de validation.', content: 'Agis comme un architecte IA senior. Crée un workflow étape par étape pour automatiser un processus métier. Inclus : contexte, déclencheur, agents IA, outils, garde-fous, format de sortie JSON et checklist qualité.', category: 'Automatisation', model: 'Claude 3.5 Sonnet', tags: ['agent', 'workflow', 'automation'], favorite: true, usage_count: 7, created_at: new Date().toISOString() },
-  { id: 'demo-2', title: 'Revue de Code & Détection de Régressions', description: 'Analyse DDD, sécurité, performance et lisibilité avant merge.', content: 'Tu es un ingénieur logiciel principal. Analyse ce diff et retourne : risques, bugs probables, dette technique, tests manquants, recommandations concrètes et correctifs si nécessaire.', category: 'Code', model: 'GPT-4.1', tags: ['code', 'review', 'ddd'], favorite: true, usage_count: 4, created_at: new Date(Date.now() - 864e5).toISOString() },
-  { id: 'demo-3', title: 'Assistant Documentation Produit', description: 'Transforme des notes en documentation claire et actionnable.', content: 'À partir des notes ci-dessous, rédige une documentation structurée avec aperçu, prérequis, étapes, exemples, FAQ et section dépannage.', category: 'Documentation', model: 'Claude 3.5 Sonnet', tags: ['docs', 'readme'], favorite: false, usage_count: 2, created_at: new Date(Date.now() - 1728e5).toISOString() },
-]
 const blankForm = { title: '', description: '', content: '', category: 'Général', model: '', tagsText: '', favorite: false }
-
-function readLocalWorkflows() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY))
-    return Array.isArray(saved) ? saved : DEMO_WORKFLOWS
-  } catch {
-    return DEMO_WORKFLOWS
-  }
-}
 
 export default function App() {
   const [session, setSession] = useState(null)
   const [authReady, setAuthReady] = useState(!configured)
-  const [workflows, setWorkflows] = useState(readLocalWorkflows)
+  const [workflows, setWorkflows] = useState([])
   const [dataLoading, setDataLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('Tous les workflows')
@@ -44,7 +29,6 @@ export default function App() {
   const [form, setForm] = useState(blankForm)
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
-  const [authMode, setAuthMode] = useState('signin')
   const [notice, setNotice] = useState(null)
   const searchRef = useRef(null)
 
@@ -52,15 +36,8 @@ export default function App() {
     setNotice({ text, type, id: Date.now() })
   }, [])
 
-  const replaceLocal = useCallback((value) => {
-    setWorkflows(previous => {
-      const next = typeof value === 'function' ? value(previous) : value
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      return next
-    })
-  }, [])
-
-  const loadCloudWorkflows = useCallback(() => {
+  const loadWorkflows = useCallback(() => {
+    setDataLoading(true)
     supabase.from('workflows').select('*').order('created_at', { ascending: false }).then(({ data, error }) => {
       setDataLoading(false)
       if (error) notify(`Chargement impossible : ${error.message}`, 'error')
@@ -81,8 +58,7 @@ export default function App() {
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
       setSession(next)
       setAuthReady(true)
-      if (next) setDataLoading(true)
-      else setWorkflows(readLocalWorkflows())
+      if (!next) setWorkflows([])
     })
     return () => {
       mounted = false
@@ -91,9 +67,8 @@ export default function App() {
   }, [notify])
 
   useEffect(() => {
-    if (!authReady) return
-    if (session) loadCloudWorkflows()
-  }, [authReady, session, loadCloudWorkflows])
+    if (authReady && session) loadWorkflows()
+  }, [authReady, session, loadWorkflows])
 
   useEffect(() => {
     const onKeyDown = event => {
@@ -117,21 +92,18 @@ export default function App() {
     return () => window.clearTimeout(timeout)
   }, [notice])
 
-  async function handleAuth(event) {
+  async function handleLogin(event) {
     event.preventDefault()
-    if (!supabase) return notify('Ajoute les variables Supabase dans .env pour activer le cloud.', 'info')
-    const credentials = { email: authEmail.trim(), password: authPassword }
-    const result = authMode === 'signin'
-      ? await supabase.auth.signInWithPassword(credentials)
-      : await supabase.auth.signUp(credentials)
-    if (result.error) notify(result.error.message, 'error')
-    else notify(authMode === 'signin' ? 'Connexion réussie.' : 'Compte créé. Vérifie ton courriel si nécessaire.')
+    if (!supabase) return notify('Configure VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env.', 'info')
+    const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword })
+    if (error) notify(error.message, 'error')
+    else notify('Connexion réussie.')
   }
 
   async function signOut() {
     const { error } = await supabase.auth.signOut()
     if (error) notify(error.message, 'error')
-    else notify('Déconnecté. Le mode local est de nouveau actif.', 'info')
+    else notify('Déconnecté.')
   }
 
   const stats = useMemo(() => ({
@@ -164,44 +136,38 @@ export default function App() {
 
   async function saveWorkflow(event) {
     event.preventDefault()
+    if (!session) return
     const payload = {
       title: form.title.trim(), description: form.description.trim(), content: form.content.trim(),
       category: form.category, model: form.model.trim(), favorite: Boolean(form.favorite),
       tags: [...new Set(form.tagsText.split(',').map(tag => tag.trim().toLowerCase()).filter(Boolean))],
+      user_id: session.user.id,
     }
-    if (session) {
-      const record = { ...payload, user_id: session.user.id }
-      const queryBuilder = editing
-        ? supabase.from('workflows').update(record).eq('id', editing.id)
-        : supabase.from('workflows').insert(record)
-      const { data, error } = await queryBuilder.select().single()
-      if (error) return notify(error.message, 'error')
-      setWorkflows(previous => editing ? previous.map(item => item.id === editing.id ? data : item) : [data, ...previous])
-    } else {
-      const local = { ...payload, id: editing?.id || crypto.randomUUID(), created_at: editing?.created_at || new Date().toISOString(), usage_count: editing?.usage_count || 0 }
-      replaceLocal(previous => editing ? previous.map(item => item.id === editing.id ? local : item) : [local, ...previous])
-    }
+    const queryBuilder = editing
+      ? supabase.from('workflows').update(payload).eq('id', editing.id)
+      : supabase.from('workflows').insert(payload)
+    const { data, error } = await queryBuilder.select().single()
+    if (error) return notify(error.message, 'error')
+    setWorkflows(previous => editing ? previous.map(item => item.id === editing.id ? data : item) : [data, ...previous])
     setModalOpen(false)
     notify(editing ? 'Workflow mis à jour.' : 'Workflow créé.')
   }
 
   async function removeWorkflow(workflow) {
     if (!window.confirm(`Supprimer « ${workflow.title} » ?`)) return
-    if (session) {
-      const { error } = await supabase.from('workflows').delete().eq('id', workflow.id)
-      if (error) return notify(error.message, 'error')
-      setWorkflows(previous => previous.filter(item => item.id !== workflow.id))
-    } else replaceLocal(previous => previous.filter(item => item.id !== workflow.id))
+    if (!session) return
+    const { error } = await supabase.from('workflows').delete().eq('id', workflow.id)
+    if (error) return notify(error.message, 'error')
+    setWorkflows(previous => previous.filter(item => item.id !== workflow.id))
     notify('Workflow supprimé.', 'info')
   }
 
   async function patchWorkflow(workflow, changes) {
+    if (!session) return
     const updated = { ...workflow, ...changes }
-    if (session) {
-      const { error } = await supabase.from('workflows').update(changes).eq('id', workflow.id)
-      if (error) return notify(error.message, 'error')
-      setWorkflows(previous => previous.map(item => item.id === workflow.id ? updated : item))
-    } else replaceLocal(previous => previous.map(item => item.id === workflow.id ? updated : item))
+    const { error } = await supabase.from('workflows').update(changes).eq('id', workflow.id)
+    if (error) return notify(error.message, 'error')
+    setWorkflows(previous => previous.map(item => item.id === workflow.id ? updated : item))
   }
 
   async function copyWorkflow(workflow) {
@@ -214,7 +180,46 @@ export default function App() {
     }
   }
 
-  if (!authReady) return <div className="center"><Sparkles className="spin" /> Initialisation…</div>
+  if (!authReady) {
+    return <div className="auth-screen"><Sparkles className="spin" /> Initialisation…</div>
+  }
+
+  if (!configured) {
+    return <div className="auth-screen">
+      <div className="auth-card" style={{ maxWidth: 420, textAlign: 'center' }}>
+        <Bot size={32} style={{ color: '#0ea5e9', marginBottom: 8 }} />
+        <h2>DarkMedia · Workflow AI</h2>
+        <p style={{ color: '#9da1bd', margin: '12px 0' }}>
+          Ajoute <code>VITE_SUPABASE_URL</code> et <code>VITE_SUPABASE_ANON_KEY</code>
+          {' '}dans le fichier <code>.env</code> pour démarrer.
+        </p>
+        <p style={{ color: '#686b83', fontSize: 13 }}>
+          Copie <code>.env.example</code> vers <code>.env</code> et renseigne les valeurs de ton projet Supabase.
+        </p>
+      </div>
+    </div>
+  }
+
+  if (!session) {
+    return <div className="auth-screen">
+      <form className="auth-card" onSubmit={handleLogin} style={{ maxWidth: 400, width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: 12 }}>
+          <Bot size={32} style={{ color: '#0ea5e9' }} />
+          <h2 style={{ margin: '8px 0 4px' }}>DarkMedia · Workflow AI</h2>
+          <p style={{ color: '#9da1bd', margin: 0, fontSize: 13 }}>Connecte-toi pour accéder à ta bibliothèque</p>
+        </div>
+        <label style={{ color: '#a5a8c1', fontWeight: 700, fontSize: 13 }}>
+          Courriel
+          <input type="email" autoComplete="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} placeholder="email@domain.com" required />
+        </label>
+        <label style={{ color: '#a5a8c1', fontWeight: 700, fontSize: 13 }}>
+          Mot de passe
+          <input type="password" autoComplete="current-password" minLength="6" value={authPassword} onChange={event => setAuthPassword(event.target.value)} placeholder="Mot de passe" required />
+        </label>
+        <button className="primary" style={{ width: '100%', justifyContent: 'center' }}>Se connecter</button>
+      </form>
+    </div>
+  }
 
   return <div className="app">
     <Sidebar open={mobileNavOpen} stats={stats} filter={filter} onFilter={selectFilter} />
@@ -223,15 +228,22 @@ export default function App() {
       <header className="topbar">
         <button className="icon mobile-menu" aria-label="Ouvrir la navigation" onClick={() => setMobileNavOpen(true)}><Menu size={19} /></button>
         <div className="header-actions">
-          <span className={`mode-pill ${configured ? 'cloud' : ''}`}>{session ? 'Cloud privé' : configured ? 'Cloud disponible' : 'Mode local'}</span>
+          <span className="mode-pill cloud">{session.user.email}</span>
           <button className="icon" aria-label="Paramètres" onClick={() => setSettingsOpen(true)}><Settings size={18}/></button>
-          {session && <button className="icon" aria-label="Se déconnecter" onClick={signOut}><LogOut size={18}/></button>}
+          <button className="icon" aria-label="Se déconnecter" onClick={signOut}><LogOut size={18}/></button>
           <button className="primary" onClick={() => openModal()}><Plus size={18}/> Nouveau workflow</button>
         </div>
       </header>
       <section className="hero">
-        <div className="hero-copy"><p className="eyebrow">Bibliothèque privée {configured ? 'Supabase' : 'locale'}</p><h1>Crée, organise et réutilise tes workflows IA.</h1><p>Recherche, catégories, favoris et sauvegarde privée — dans ton navigateur ou synchronisée avec Supabase.</p></div>
-        <AuthBox configured={configured} session={session} authEmail={authEmail} setAuthEmail={setAuthEmail} authPassword={authPassword} setAuthPassword={setAuthPassword} authMode={authMode} setAuthMode={setAuthMode} handleAuth={handleAuth} />
+        <div className="hero-copy"><p className="eyebrow">Bibliothèque privée</p><h1>Crée, organise et réutilise tes workflows IA.</h1><p>Recherche, catégories, favoris et sauvegarde privée — synchronisée avec Supabase.</p></div>
+        <div className="auth-card connected">
+          <div className="status-icon"><Check/></div>
+          <div>
+            <h3 style={{ margin: 0 }}>Synchronisation active</h3>
+            <p>{session.user.email}</p>
+            <small style={{ color: '#81859f' }}>Données protégées par Row Level Security.</small>
+          </div>
+        </div>
       </section>
       <div className="toolbar">
         <label><Search size={17}/><span className="sr-only">Rechercher</span><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher… (Ctrl+K)" /></label>
@@ -241,7 +253,7 @@ export default function App() {
       {dataLoading ? <div className="empty"><Sparkles className="spin" /><h2>Chargement de tes workflows…</h2></div> : filtered.length ? <section className="grid">{filtered.map(workflow => <WorkflowCard key={workflow.id} workflow={workflow} onEdit={() => openModal(workflow)} onDelete={() => removeWorkflow(workflow)} onFavorite={() => patchWorkflow(workflow, { favorite: !workflow.favorite })} onCopy={() => copyWorkflow(workflow)} />)}</section> : <EmptyState onReset={() => { setQuery(''); setFilter('Tous les workflows') }} onCreate={() => openModal()} />}
     </main>
     {modalOpen && <WorkflowModal form={form} setForm={setForm} onClose={() => setModalOpen(false)} onSubmit={saveWorkflow} editing={editing} />}
-    {settingsOpen && <SettingsModal configured={configured} session={session} count={workflows.length} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <SettingsModal session={session} count={workflows.length} onClose={() => setSettingsOpen(false)} />}
     {notice && <div className={`toast ${notice.type}`} role="status">{notice.type === 'error' ? <X size={17}/> : notice.type === 'info' ? <Info size={17}/> : <Check size={17}/>}<span>{notice.text}</span><button aria-label="Fermer" onClick={() => setNotice(null)}><X size={15}/></button></div>}
   </div>
 }
@@ -255,12 +267,6 @@ function Sidebar({ open, stats, filter, onFilter }) {
     <small>CATÉGORIES</small>{stats.cats.map(category => <NavItem key={category.name} dot={COLORS[category.name]} active={filter === category.name} label={category.name} count={category.count} onClick={() => onFilter(category.name)} />)}
     {stats.tags.length > 0 && <><small>TAGS POPULAIRES</small>{stats.tags.map(tag => <button className={`tag-nav ${filter === tag ? 'active' : ''}`} key={tag} onClick={() => onFilter(tag)}><Tags size={14}/>{tag}</button>)}</>}
   </aside>
-}
-
-function AuthBox({ configured, session, authEmail, setAuthEmail, authPassword, setAuthPassword, authMode, setAuthMode, handleAuth }) {
-  if (session) return <div className="auth-card connected"><div className="status-icon"><Check/></div><div><h3>Synchronisation active</h3><p>{session.user.email}</p><small>Tes workflows sont protégés par les règles RLS.</small></div></div>
-  if (!configured) return <div className="auth-card demo-card"><div className="status-icon"><Sparkles /></div><div><h3>Mode local prêt</h3><p>Tout est conservé dans ce navigateur.</p><small>Configure Supabase dans <code>.env</code> pour activer les comptes et la synchronisation.</small></div></div>
-  return <form className="auth-card" onSubmit={handleAuth}><h3>{authMode === 'signin' ? 'Connexion Supabase' : 'Créer un compte'}</h3><label><span className="sr-only">Courriel</span><input type="email" autoComplete="email" value={authEmail} onChange={event => setAuthEmail(event.target.value)} placeholder="email@domain.com" required /></label><label><span className="sr-only">Mot de passe</span><input type="password" autoComplete={authMode === 'signin' ? 'current-password' : 'new-password'} minLength="6" value={authPassword} onChange={event => setAuthPassword(event.target.value)} placeholder="Mot de passe" required /></label><button className="primary">{authMode === 'signin' ? 'Se connecter' : 'Créer mon compte'}</button><button type="button" className="link" onClick={() => setAuthMode(authMode === 'signin' ? 'signup' : 'signin')}>{authMode === 'signin' ? 'Créer un compte' : 'Déjà inscrit ?'}</button></form>
 }
 
 function NavItem({ icon, label, count, active, onClick, dot }) {
@@ -303,8 +309,8 @@ function WorkflowModal({ form, setForm, onClose, onSubmit, editing }) {
   </form></div>
 }
 
-function SettingsModal({ configured, session, count, onClose }) {
-  return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><h2 id="settings-title">État de l’application</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header><div className="settings-content"><div className="setting-row"><span>Stockage actif</span><b>{session ? 'Supabase Cloud' : 'Navigateur local'}</b></div><div className="setting-row"><span>Supabase configuré</span><b className={configured ? 'ok' : ''}>{configured ? 'Oui' : 'Non'}</b></div><div className="setting-row"><span>Session</span><b>{session ? session.user.email : 'Hors connexion'}</b></div><div className="setting-row"><span>Workflows chargés</span><b>{count}</b></div><p><Info size={17}/> Le mode local est pleinement fonctionnel. Pour activer la synchronisation privée, copie <code>.env.example</code> vers <code>.env</code>, renseigne les clés Supabase et exécute le schéma SQL fourni.</p></div></section></div>
+function SettingsModal({ session, count, onClose }) {
+  return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><h2 id="settings-title">État de l’application</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header><div className="settings-content"><div className="setting-row"><span>Stockage</span><b>Supabase Cloud</b></div><div className="setting-row"><span>Session</span><b>{session ? session.user.email : 'Hors connexion'}</b></div><div className="setting-row"><span>Workflows</span><b>{count}</b></div></div></section></div>
 }
 
 function EmptyState({ onReset, onCreate }) {
