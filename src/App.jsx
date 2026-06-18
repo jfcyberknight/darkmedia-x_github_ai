@@ -80,6 +80,7 @@ export default function App() {
   }, [notify])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (authReady && session) loadWorkflows()
   }, [authReady, session, loadWorkflows])
 
@@ -329,7 +330,7 @@ export default function App() {
         <select aria-label="Trier les workflows" value={sort} onChange={event => setSort(event.target.value)}><option value="recent">Plus récents</option><option value="popular">Plus utilisés</option></select>
       </div>
       <div className="results-heading"><p><b>{filtered.length}</b> workflow{filtered.length > 1 ? 's' : ''}{filter !== 'Tous les workflows' && <> dans <span>{filter}</span></>}</p>{(query || filter !== 'Tous les workflows') && <button className="link" onClick={() => { setQuery(''); setFilter('Tous les workflows') }}>Réinitialiser</button>}</div>
-      {dataLoading ? <div className="empty"><Sparkles className="spin" /><h2>Chargement de tes workflows…</h2></div> : filtered.length ? <section className="grid">{filtered.map(workflow => <WorkflowCard key={workflow.id} workflow={workflow} onEdit={() => openModal(workflow)} onDelete={() => removeWorkflow(workflow)} onFavorite={() => patchWorkflow(workflow, { favorite: !workflow.favorite })} onCopy={() => copyWorkflow(workflow)} />)}</section> : <EmptyState onReset={() => { setQuery(''); setFilter('Tous les workflows') }} onCreate={() => openModal()} onImport={openImport} />}
+      {dataLoading ? <div className="empty"><Sparkles className="spin" /><h2>Chargement de tes workflows…</h2></div> : filtered.length ? <section className="grid">{filtered.map(workflow => <WorkflowCard key={workflow.id} workflow={workflow} onEdit={() => openModal(workflow)} onDelete={() => removeWorkflow(workflow)} onFavorite={() => patchWorkflow(workflow, { favorite: !workflow.favorite })} onCopy={() => copyWorkflow(workflow)} />)}</section> : <EmptyState onCreate={() => openModal()} onImport={openImport} />}
     </main>
     {modalOpen && <WorkflowModal form={form} setForm={setForm} onClose={() => setModalOpen(false)} onSubmit={saveWorkflow} editing={editing} />}
     {importOpen && <ImportModal session={session} state={importState} setState={setImportState} result={importResult} setResult={setImportResult} onClose={() => setImportOpen(false)} onImport={async (s, r) => { const d = await importWorkflows(s, r); setWorkflows(prev => [...d, ...prev]); return d }} notify={notify} />}
@@ -445,7 +446,7 @@ function ImportModal({ session, state, setState, result, setResult, onClose, onI
       <div className="settings-content">
         {state === 'idle' && <form onSubmit={handleAnalyze}>
           <p style={{ color: '#9da1bd', margin: '0 0 16px', fontSize: 14, lineHeight: 1.5 }}>
-            Analyse n'importe quel dépôt GitHub public et génère automatiquement 5 workflows IA adaptés à son stack : revue de code, debug, documentation, tests et architecture.
+            Analyse n'importe quel dépôt GitHub public et génère des workflows IA réutilisables et dépersonnalisés, adaptés à son stack : revue de code, debug, documentation, tests et architecture.
           </p>
           <label style={{ display: 'block', marginBottom: 16, fontWeight: 700, fontSize: 13, color: '#a5a8c1' }}>
             URL du dépôt GitHub
@@ -459,6 +460,7 @@ function ImportModal({ session, state, setState, result, setResult, onClose, onI
           {result.description && <div className="setting-row"><span>Description</span><b style={{ fontWeight: 400, textAlign: 'right', maxWidth: '60%' }}>{result.description}</b></div>}
           <div className="setting-row"><span>Language</span><b>{result.language}</b></div>
           {result.stacks.length > 0 && <div className="setting-row"><span>Stack détecté</span><b style={{ fontWeight: 400, maxWidth: '60%', textAlign: 'right' }}>{result.stacks.join(', ')}</b></div>}
+          {result.existingWorkflows && result.existingWorkflows.length > 0 && <div className="setting-row"><span>CI existants</span><b style={{ fontWeight: 400, maxWidth: '60%', textAlign: 'right', color: '#10b981' }}>{result.existingWorkflows.join(', ')}</b></div>}
           <div className="setting-row"><span>Workflows générés</span><b>{result.workflows.length}</b></div>
           <div style={{ marginTop: 16, maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
             {result.workflows.map((w, i) => <div key={i} style={{ background: '#11121a', border: '1px solid #303246', borderRadius: 10, padding: 12 }}>
@@ -478,6 +480,6 @@ function ImportModal({ session, state, setState, result, setResult, onClose, onI
   </div>
 }
 
-function EmptyState({ onReset, onCreate, onImport }) {
+function EmptyState({ onCreate, onImport }) {
   return <section className="empty"><Search size={28}/><h2>Aucun workflow trouvé</h2><p>Importe des workflows depuis un dépôt GitHub ou crée le premier workflow manuellement.</p><div><button className="secondary" onClick={onImport}><GitFork size={17}/> Importer depuis GitHub</button><button className="primary" onClick={onCreate}><Plus size={17}/> Nouveau workflow</button></div></section>
 }

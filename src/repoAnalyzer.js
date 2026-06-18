@@ -26,10 +26,28 @@ const DETECTORS = [
   { key: 'pubspec.yaml', label: 'Flutter / Dart', priority: 2 },
   { key: 'mix.exs', label: 'Elixir', priority: 2 },
   { key: 'Podfile', label: 'CocoaPods / iOS', priority: 2 },
-  { key: 'Cargo.toml', label: 'Rust', priority: 1 },
-  { key: 'composer.json', label: 'PHP', priority: 1 },
-  { key: 'Gemfile', label: 'Ruby', priority: 1 },
 ]
+
+const TEST_FRAMEWORKS = ['vitest', 'jest', 'mocha', 'pytest', 'unittest', 'go test', 'cargo test', 'phpunit', 'rspec', 'junit', 'dart test']
+
+function hasTestFramework(pkg) {
+  if (!pkg) return false
+  const all = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) }
+  return Object.keys(all).some(name => TEST_FRAMEWORKS.some(fw => name.includes(fw.split(' ')[0])))
+}
+
+function detectExistingWorkflowsNames(items) {
+  if (!Array.isArray(items)) return []
+  return items
+    .filter(item => item.type === 'file' && /\.(ya?ml)$/i.test(item.name))
+    .map(item => item.name.replace(/\.(ya?ml)$/i, ''))
+}
+
+async function fetchJson(url, headers) {
+  const res = await fetch(url, { headers })
+  if (!res.ok) return null
+  return res.json().catch(() => null)
+}
 
 export async function analyzeRepo(url) {
   const match = url.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/|$)/)
@@ -57,7 +75,21 @@ export async function analyzeRepo(url) {
   const stacks = [...new Set(detected.map(d => d.label))]
   const lang = repoData.language || stacks[0] || 'Général'
 
-  const workflows = generateWorkflows(owner, repo, repoData.description || '', stacks.length ? stacks.join(', ') : lang)
+  const pkg = fileNames.includes('package.json')
+    ? await fetchJson(`${apiRoot}/contents/package.json`, { ...headers, Accept: 'application/vnd.github.raw' })
+    : null
+
+  const workflowsDir = await fetchJson(`${apiRoot}/contents/.github/workflows`, headers)
+  const existingWorkflows = detectExistingWorkflowsNames(workflowsDir)
+
+  const hasTests = hasTestFramework(pkg)
+  const hasCi = existingWorkflows.length > 0 || detected.some(d => d.key === '.github/workflows')
+
+  const workflows = generateWorkflows({
+    lang,
+    hasTests,
+    hasCi,
+  })
 
   return {
     owner,
@@ -69,19 +101,19 @@ export async function analyzeRepo(url) {
     topics: repoData.topics || [],
     defaultBranch: repoData.default_branch || 'main',
     htmlUrl: repoData.html_url,
+    existingWorkflows,
     workflows,
   }
 }
 
-function generateWorkflows(owner, repo, description, tech) {
-  const lang = tech || 'Général'
-  const ref = `${owner}/${repo}`
+function generateWorkflows({ lang, hasTests, hasCi }) {
+  const tag = lang.toLowerCase().replace(/\s+/g, '-')
+  const list = []
 
-  return [
-    {
-      title: `Revue de code — ${repo}`,
-      description: `Analyse de code ciblée ${lang} avec checklists qualité, sécurité et performance pour ${ref}.`,
-      content: `Tu es un ingénieur senior spécialiste ${lang}. Analyse le dépôt ${ref} et produis une revue structurée :
+  const reviewWorkflow = {
+    title: `Revue de code — ${lang}`,
+    description: `Analyse de code ciblée ${lang} avec checklists qualité, sécurité et performance.`,
+    content: `Tu es un ingénieur senior spécialiste ${lang}. Analyse ce dépôt et produis une revue structurée :
 
 1. **Architecture** — Découpage, couplage, cohérence du modèle de données.
 2. **Sécurité** — Failles potentielles (OWASP Top 10), secrets, validations.
@@ -90,13 +122,14 @@ function generateWorkflows(owner, repo, description, tech) {
 5. **Maintenabilité** — Complexité cyclomatique, duplication, documentation.
 
 Format : checklist actionnable priorisée par sévérité (🔴 🟡 🟢).`,
-      category: 'Code',
-      tags: ['revue-de-code', 'qualité', lang.toLowerCase().replace(/\s+/g, '-')],
-    },
-    {
-      title: `Debug & Dépannage — ${repo}`,
-      description: `Workflow de diagnostic structuré pour bugs et incidents sur stack ${lang}.`,
-      content: `Tu es un SRE spécialiste ${lang}. Un incident est signalé sur ${ref}. Suis ce protocole :
+    category: 'Code',
+    tags: ['revue-de-code', 'qualité', tag],
+  }
+
+  const debugWorkflow = {
+    title: `Debug & Dépannage — ${lang}`,
+    description: `Workflow de diagnostic structuré pour bugs et incidents sur stack ${lang}.`,
+    content: `Tu es un SRE spécialiste ${lang}. Un incident est signalé sur ce projet. Suis ce protocole :
 
 1. **Reproduction** — Déterminer le scope exact, environnement, logs.
 2. **Isolation** — Git bisect, binaire des dépendances, variables d'env.
@@ -105,13 +138,14 @@ Format : checklist actionnable priorisée par sévérité (🔴 🟡 🟢).`,
 5. **Post-mortem** — Root cause, blameless, action items.
 
 Format : chaque étape avec commandes concrètes et exemples de sortie attendue.`,
-      category: 'Débogage',
-      tags: ['debug', 'sre', lang.toLowerCase().replace(/\s+/g, '-')],
-    },
-    {
-      title: `Documentation — ${repo}`,
-      description: `Génération de documentation technique et README enrichi pour ${ref}.`,
-      content: `Tu es un technical writer. Documente le dépôt ${ref} (${lang}) :
+    category: 'Débogage',
+    tags: ['debug', 'sre', tag],
+  }
+
+  const docWorkflow = {
+    title: `Documentation — ${lang}`,
+    description: `Génération de documentation technique et README enrichi pour un projet ${lang}.`,
+    content: `Tu es un technical writer. Documente ce dépôt (${lang}) :
 
 1. **README** — Badges, démarrage rapide, prérequis, variables d'env.
 2. **Architecture** — Diagramme textuel, flux de données, décisions clés (ADR).
@@ -119,13 +153,14 @@ Format : chaque étape avec commandes concrètes et exemples de sortie attendue.
 4. **Contribution** — Setup dev, tests, conventions, review process.
 
 Format : Markdown prêt à copier, structuré par section.`,
-      category: 'Documentation',
-      tags: ['documentation', 'readme', lang.toLowerCase().replace(/\s+/g, '-')],
-    },
-    {
-      title: `Tests & Qualité — ${repo}`,
-      description: `Stratégie de test et génération de cas de test pour stack ${lang}.`,
-      content: `Tu es un QA engineer expert ${lang}. Analyse ${ref} et produis :
+    category: 'Documentation',
+    tags: ['documentation', 'readme', tag],
+  }
+
+  const testsWorkflow = {
+    title: `Tests & Qualité — ${lang}`,
+    description: `Stratégie de test et génération de cas de test pour stack ${lang}.`,
+    content: `Tu es un QA engineer expert ${lang}. Analyse ce dépôt et produis :
 
 1. **Stratégie** — Unitaires, intégration, E2E — couverture cible par module.
 2. **Cas de test prioritaires** — Edge cases, valeurs limites, scénarios erreur.
@@ -133,13 +168,14 @@ Format : Markdown prêt à copier, structuré par section.`,
 4. **Pipeline CI** — Étapes de validation, gate de qualité, rapports.
 
 Format : Gherkin (Feature/Scenario) + extraits de code du framework adapté.`,
-      category: 'Code',
-      tags: ['tests', 'qa', lang.toLowerCase().replace(/\s+/g, '-')],
-    },
-    {
-      title: `Architecture & Dette Technique — ${repo}`,
-      description: `Analyse d'architecture, diagramme C4 et plan de refactoring pour ${ref}.`,
-      content: `Tu es un architecte logiciel. Analyse ${ref} et livre :
+    category: 'Code',
+    tags: ['tests', 'qa', tag],
+  }
+
+  const archWorkflow = {
+    title: `Architecture & Dette Technique — ${lang}`,
+    description: `Analyse d'architecture, diagramme C4 et plan de refactoring.`,
+    content: `Tu es un architecte logiciel. Analyse ce dépôt et livre :
 
 1. **Vue C4** — Contexte, conteneurs, composants, code (textuel).
 2. **Forces & Faiblesses** — Ce qui est bien conçu / à améliorer.
@@ -147,8 +183,15 @@ Format : Gherkin (Feature/Scenario) + extraits de code du framework adapté.`,
 4. **Feuille de route** — Refactoring par priorité (quick wins vs chantiers).
 
 Format : sections concises avec extraits de code pour illustrer chaque point.`,
-      category: 'Analyse',
-      tags: ['architecture', 'dette-technique', lang.toLowerCase().replace(/\s+/g, '-')],
-    },
-  ]
+    category: 'Analyse',
+    tags: ['architecture', 'dette-technique', tag],
+  }
+
+  list.push(reviewWorkflow)
+  list.push(debugWorkflow)
+  list.push(docWorkflow)
+  if (!hasTests) list.push(testsWorkflow)
+  if (!hasCi) list.push(archWorkflow)
+
+  return list
 }
