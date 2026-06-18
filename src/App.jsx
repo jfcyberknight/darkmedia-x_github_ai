@@ -34,6 +34,9 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState('')
   const [authPassword, setAuthPassword] = useState('')
   const [notice, setNotice] = useState(null)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [resetSent, setResetSent] = useState(false)
   const searchRef = useRef(null)
 
   const notify = useCallback((text, type = 'success') => {
@@ -59,7 +62,13 @@ export default function App() {
       if (data?.session) setDataLoading(true)
       setAuthReady(true)
     })
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data } = supabase.auth.onAuthStateChange((event, next) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true)
+        setSession(next)
+        setAuthReady(true)
+        return
+      }
       setSession(next)
       setAuthReady(true)
       if (!next) setWorkflows([])
@@ -111,6 +120,28 @@ export default function App() {
     const { error } = await supabase.auth.signOut()
     if (error) notify(error.message, 'error')
     else notify('Déconnecté.')
+  }
+
+  async function handleResetPassword(event) {
+    event.preventDefault()
+    if (!supabase) return
+    const { error } = await supabase.auth.resetPasswordForEmail(authEmail.trim(), {
+      redirectTo: window.location.origin + window.location.pathname,
+    })
+    if (error) notify(error.message, 'error')
+    else { setResetSent(true); notify('Email de réinitialisation envoyé.', 'success') }
+  }
+
+  async function handleUpdatePassword(event) {
+    event.preventDefault()
+    if (!supabase) return
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) notify(error.message, 'error')
+    else {
+      setPasswordRecovery(false)
+      setNewPassword('')
+      notify('Mot de passe mis à jour avec succès.', 'success')
+    }
   }
 
   const stats = useMemo(() => ({
@@ -213,6 +244,23 @@ export default function App() {
     </div>
   }
 
+  if (passwordRecovery) {
+    return <div className="auth-screen">
+      <form className="auth-card" onSubmit={handleUpdatePassword} style={{ maxWidth: 400, width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: 12 }}>
+          <Bot size={32} style={{ color: '#0ea5e9' }} />
+          <h2 style={{ margin: '8px 0 4px' }}>Nouveau mot de passe</h2>
+          <p style={{ color: '#9da1bd', margin: 0, fontSize: 13 }}>Définis ton nouveau mot de passe pour te connecter.</p>
+        </div>
+        <label style={{ color: '#a5a8c1', fontWeight: 700, fontSize: 13 }}>
+          Nouveau mot de passe
+          <input type="password" autoComplete="new-password" minLength="6" value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="Minimum 6 caractères" required />
+        </label>
+        <button className="primary" style={{ width: '100%', justifyContent: 'center' }}>Mettre à jour</button>
+      </form>
+    </div>
+  }
+
   if (!session) {
     return <div className="auth-screen">
       <form className="auth-card" onSubmit={handleLogin} style={{ maxWidth: 400, width: '100%' }}>
@@ -230,6 +278,10 @@ export default function App() {
           <input type="password" autoComplete="current-password" minLength="6" value={authPassword} onChange={event => setAuthPassword(event.target.value)} placeholder="Mot de passe" required />
         </label>
         <button className="primary" style={{ width: '100%', justifyContent: 'center' }}>Se connecter</button>
+        {resetSent
+          ? <small style={{ color: '#10b981', textAlign: 'center' }}>Email envoyé. Vérifie ta boîte de réception et clique le lien.</small>
+          : <button type="button" className="link" style={{ textAlign: 'center', color: '#38bdf8', fontSize: 13, background: 'none', border: 0, width: '100%', marginTop: 4 }} onClick={handleResetPassword}>Mot de passe oublié ?</button>
+        }
       </form>
     </div>
   }
