@@ -101,7 +101,7 @@ export default function App() {
     event.preventDefault()
     if (!supabase) return notify('Configure VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env.', 'info')
     const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword })
-    if (error) notify(error.message, 'error')
+    if (error) notify(error.message + ' — Vérifie que le compte existe dans Supabase (Authentication > Users > Add User).', 'error')
     else notify('Connexion réussie.')
   }
 
@@ -137,6 +137,12 @@ export default function App() {
     setEditing(workflow)
     setForm(workflow ? { ...workflow, tagsText: (workflow.tags || []).join(', ') } : { ...blankForm })
     setModalOpen(true)
+  }
+
+  function openImport() {
+    setImportOpen(true)
+    setImportState('idle')
+    setImportResult(null)
   }
 
   async function saveWorkflow(event) {
@@ -193,7 +199,7 @@ export default function App() {
     return <div className="auth-screen">
       <div className="auth-card" style={{ maxWidth: 420, textAlign: 'center' }}>
         <Bot size={32} style={{ color: '#0ea5e9', marginBottom: 8 }} />
-        <h2>DarkMedia · Workflow AI</h2>
+        <h2>Agent Hub</h2>
         <p style={{ color: '#9da1bd', margin: '12px 0' }}>
           Ajoute <code>VITE_SUPABASE_URL</code> et <code>VITE_SUPABASE_ANON_KEY</code>
           {' '}dans le fichier <code>.env</code> pour démarrer.
@@ -210,8 +216,8 @@ export default function App() {
       <form className="auth-card" onSubmit={handleLogin} style={{ maxWidth: 400, width: '100%' }}>
         <div style={{ textAlign: 'center', marginBottom: 12 }}>
           <Bot size={32} style={{ color: '#0ea5e9' }} />
-          <h2 style={{ margin: '8px 0 4px' }}>DarkMedia · Workflow AI</h2>
-          <p style={{ color: '#9da1bd', margin: 0, fontSize: 13 }}>Connecte-toi pour accéder à ta bibliothèque</p>
+          <h2 style={{ margin: '8px 0 4px' }}>Agent Hub</h2>
+          <p style={{ color: '#9da1bd', margin: 0, fontSize: 13 }}>Génère et gère tes workflows IA depuis n'importe quel dépôt GitHub</p>
         </div>
         <label style={{ color: '#a5a8c1', fontWeight: 700, fontSize: 13 }}>
           Courriel
@@ -227,36 +233,44 @@ export default function App() {
   }
 
   return <div className="app">
-    <Sidebar open={mobileNavOpen} stats={stats} filter={filter} onFilter={selectFilter} />
+    <Sidebar open={mobileNavOpen} stats={stats} filter={filter} onFilter={selectFilter} onImport={openImport} />
     {mobileNavOpen && <button className="nav-backdrop" aria-label="Fermer la navigation" onClick={() => setMobileNavOpen(false)} />}
     <main>
       <header className="topbar">
         <button className="icon mobile-menu" aria-label="Ouvrir la navigation" onClick={() => setMobileNavOpen(true)}><Menu size={19} /></button>
         <div className="header-actions">
-          <span className="mode-pill cloud">{session.user.email}</span>
+          <span className="mode-pill">{session.user.email}</span>
           <button className="icon" aria-label="Paramètres" onClick={() => setSettingsOpen(true)}><Settings size={18}/></button>
           <button className="icon" aria-label="Se déconnecter" onClick={signOut}><LogOut size={18}/></button>
-          <button className="icon" aria-label="Importer depuis GitHub" title="Importer depuis GitHub" onClick={() => { setImportOpen(true); setImportState('idle'); setImportResult(null) }}><GitFork size={18}/></button>
+          <button className="secondary" onClick={openImport}><GitFork size={17}/> Importer depuis GitHub</button>
           <button className="primary" onClick={() => openModal()}><Plus size={18}/> Nouveau workflow</button>
         </div>
       </header>
       <section className="hero">
-        <div className="hero-copy"><p className="eyebrow">Bibliothèque privée</p><h1>Crée, organise et réutilise tes workflows IA.</h1><p>Recherche, catégories, favoris et sauvegarde privée — synchronisée avec Supabase.</p></div>
+        <div className="hero-copy">
+          <p className="eyebrow">Agent Hub · Workflows IA</p>
+          <h1>Génère des workflows adaptés à n'importe quel dépôt.</h1>
+          <p>Colle une URL GitHub, analyse le stack et importe des workflows prêts à l'emploi — revue, debug, documentation, tests, architecture.</p>
+          <div className="hero-actions">
+            <button className="primary" onClick={openImport}><GitFork size={18}/> Analyser un dépôt GitHub</button>
+            <button className="secondary" onClick={() => openModal()}><Sparkles size={18}/> Créer un workflow manuellement</button>
+          </div>
+        </div>
         <div className="auth-card connected">
           <div className="status-icon"><Check/></div>
           <div>
-            <h3 style={{ margin: 0 }}>Synchronisation active</h3>
+            <h3 style={{ margin: 0 }}>Connecté</h3>
             <p>{session.user.email}</p>
-            <small style={{ color: '#81859f' }}>Données protégées par Row Level Security.</small>
+            <small style={{ color: '#81859f' }}>Données protégées RLS · {workflows.length} workflow{workflows.length > 1 ? 's' : ''}</small>
           </div>
         </div>
       </section>
       <div className="toolbar">
-        <label><Search size={17}/><span className="sr-only">Rechercher</span><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher… (Ctrl+K)" /></label>
+        <label><Search size={17}/><span className="sr-only">Rechercher</span><input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher un workflow… (Ctrl+K)" /></label>
         <select aria-label="Trier les workflows" value={sort} onChange={event => setSort(event.target.value)}><option value="recent">Plus récents</option><option value="popular">Plus utilisés</option></select>
       </div>
       <div className="results-heading"><p><b>{filtered.length}</b> workflow{filtered.length > 1 ? 's' : ''}{filter !== 'Tous les workflows' && <> dans <span>{filter}</span></>}</p>{(query || filter !== 'Tous les workflows') && <button className="link" onClick={() => { setQuery(''); setFilter('Tous les workflows') }}>Réinitialiser</button>}</div>
-      {dataLoading ? <div className="empty"><Sparkles className="spin" /><h2>Chargement de tes workflows…</h2></div> : filtered.length ? <section className="grid">{filtered.map(workflow => <WorkflowCard key={workflow.id} workflow={workflow} onEdit={() => openModal(workflow)} onDelete={() => removeWorkflow(workflow)} onFavorite={() => patchWorkflow(workflow, { favorite: !workflow.favorite })} onCopy={() => copyWorkflow(workflow)} />)}</section> : <EmptyState onReset={() => { setQuery(''); setFilter('Tous les workflows') }} onCreate={() => openModal()} />}
+      {dataLoading ? <div className="empty"><Sparkles className="spin" /><h2>Chargement de tes workflows…</h2></div> : filtered.length ? <section className="grid">{filtered.map(workflow => <WorkflowCard key={workflow.id} workflow={workflow} onEdit={() => openModal(workflow)} onDelete={() => removeWorkflow(workflow)} onFavorite={() => patchWorkflow(workflow, { favorite: !workflow.favorite })} onCopy={() => copyWorkflow(workflow)} />)}</section> : <EmptyState onReset={() => { setQuery(''); setFilter('Tous les workflows') }} onCreate={() => openModal()} onImport={openImport} />}
     </main>
     {modalOpen && <WorkflowModal form={form} setForm={setForm} onClose={() => setModalOpen(false)} onSubmit={saveWorkflow} editing={editing} />}
     {importOpen && <ImportModal session={session} state={importState} setState={setImportState} result={importResult} setResult={setImportResult} onClose={() => setImportOpen(false)} onImport={async (s, r) => { const d = await importWorkflows(s, r); setWorkflows(prev => [...d, ...prev]); return d }} notify={notify} />}
@@ -276,14 +290,16 @@ async function importWorkflows(session, repoInfo) {
   return data
 }
 
-function Sidebar({ open, stats, filter, onFilter }) {
+function Sidebar({ open, stats, filter, onFilter, onImport }) {
   return <aside className={`sidebar ${open ? 'open' : ''}`}>
-    <div className="brand"><Bot size={22} /><strong>DarkMedia · Workflow AI</strong></div>
-    <small>VUE</small>
+    <div className="brand"><Bot size={22} /><strong>Agent Hub</strong></div>
+    <small>BIBLIOTHÈQUE</small>
     <NavItem active={filter === 'Tous les workflows'} icon={<Grid3X3 />} label="Tous les workflows" count={stats.total} onClick={() => onFilter('Tous les workflows')} />
     <NavItem active={filter === 'Favoris'} icon={<Star />} label="Favoris" count={stats.favs} onClick={() => onFilter('Favoris')} />
     <small>CATÉGORIES</small>{stats.cats.map(category => <NavItem key={category.name} dot={COLORS[category.name]} active={filter === category.name} label={category.name} count={category.count} onClick={() => onFilter(category.name)} />)}
     {stats.tags.length > 0 && <><small>TAGS POPULAIRES</small>{stats.tags.map(tag => <button className={`tag-nav ${filter === tag ? 'active' : ''}`} key={tag} onClick={() => onFilter(tag)}><Tags size={14}/>{tag}</button>)}</>}
+    <small>ACTIONS</small>
+    <button className="nav" onClick={onImport}><span className="nav-icon"><GitFork size={16}/></span><span>Importer depuis GitHub</span></button>
   </aside>
 }
 
@@ -292,10 +308,15 @@ function NavItem({ icon, label, count, active, onClick, dot }) {
 }
 
 function WorkflowCard({ workflow, onEdit, onDelete, onFavorite, onCopy }) {
+  const isAgent = (workflow.tags || []).some(t => ['agent', 'github-agent', 'workflow-gen'].includes(t))
   return <article className="card">
     <button className="star" aria-label={workflow.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} onClick={onFavorite}><Star size={18} fill={workflow.favorite ? '#f59e0b' : 'none'}/></button>
     <h3>{workflow.title}</h3><p>{workflow.description || 'Aucune description.'}</p><pre>{workflow.content}</pre>
-    <div className="chips"><span style={{ borderColor: COLORS[workflow.category], color: COLORS[workflow.category] }}>{workflow.category}</span>{workflow.model && <span>{workflow.model}</span>}{(workflow.tags || []).slice(0, 3).map(tag => <span key={tag}>#{tag}</span>)}</div>
+    <div className="chips">
+      <span style={{ borderColor: COLORS[workflow.category], color: COLORS[workflow.category] }}>{workflow.category}</span>
+      {isAgent && <span style={{ borderColor: '#0ea5e9', color: '#0ea5e9', background: '#0c223a' }}>🤖 Agent</span>}
+      {(workflow.tags || []).slice(0, 3).map(tag => <span key={tag}>#{tag}</span>)}
+    </div>
     <footer><small><Clock3 size={13}/>{new Date(workflow.created_at).toLocaleDateString('fr-CA')} · {workflow.usage_count || 0} util.</small><div><button aria-label="Copier le workflow" title="Copier" onClick={onCopy}><Copy size={15}/></button><button aria-label="Modifier le workflow" title="Modifier" onClick={onEdit}><Wand2 size={15}/></button><button className="danger-button" aria-label="Supprimer le workflow" title="Supprimer" onClick={onDelete}><Trash2 size={15}/></button></div></footer>
   </article>
 }
@@ -328,7 +349,7 @@ function WorkflowModal({ form, setForm, onClose, onSubmit, editing }) {
 }
 
 function SettingsModal({ session, count, onClose }) {
-  return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><h2 id="settings-title">État de l’application</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header><div className="settings-content"><div className="setting-row"><span>Stockage</span><b>Supabase Cloud</b></div><div className="setting-row"><span>Session</span><b>{session ? session.user.email : 'Hors connexion'}</b></div><div className="setting-row"><span>Workflows</span><b>{count}</b></div></div></section></div>
+  return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><h2 id="settings-title">App Info</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header><div className="settings-content"><div className="setting-row"><span>Version</span><b>1.0.0</b></div><div className="setting-row"><span>Stockage</span><b>Supabase Cloud</b></div><div className="setting-row"><span>Session</span><b>{session ? session.user.email : 'Hors connexion'}</b></div><div className="setting-row"><span>Workflows</span><b>{count}</b></div></div></section></div>
 }
 
 function ImportModal({ session, state, setState, result, setResult, onClose, onImport, notify }) {
@@ -360,10 +381,13 @@ function ImportModal({ session, state, setState, result, setResult, onClose, onI
     }
   }
   return <div className="overlay" onMouseDown={event => event.target === event.currentTarget && onClose()}>
-    <section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
+    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="import-title" style={{ maxWidth: 640 }}>
       <header><h2 id="import-title">Importer depuis GitHub</h2><button aria-label="Fermer" onClick={onClose}><X/></button></header>
       <div className="settings-content">
         {state === 'idle' && <form onSubmit={handleAnalyze}>
+          <p style={{ color: '#9da1bd', margin: '0 0 16px', fontSize: 14, lineHeight: 1.5 }}>
+            Analyse n'importe quel dépôt GitHub public et génère automatiquement 5 workflows IA adaptés à son stack : revue de code, debug, documentation, tests et architecture.
+          </p>
           <label style={{ display: 'block', marginBottom: 16, fontWeight: 700, fontSize: 13, color: '#a5a8c1' }}>
             URL du dépôt GitHub
             <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://github.com/owner/repo" required style={{ marginTop: 6 }} />
@@ -385,7 +409,7 @@ function ImportModal({ session, state, setState, result, setResult, onClose, onI
             </div>)}
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-            <button className="secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setState('idle'); setResult(null) }}>Analyser un autre dépôt</button>
+            <button className="secondary" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setState('idle'); setResult(null); setUrl('') }}>Analyser un autre dépôt</button>
             <button className="primary" style={{ flex: 1, justifyContent: 'center' }} onClick={handleImportAll}><Plus size={17}/> Tout importer ({result.workflows.length})</button>
           </div>
         </>}
@@ -395,6 +419,6 @@ function ImportModal({ session, state, setState, result, setResult, onClose, onI
   </div>
 }
 
-function EmptyState({ onReset, onCreate }) {
-  return <section className="empty"><Search size={28}/><h2>Aucun workflow trouvé</h2><p>Modifie tes filtres ou crée le workflow qui manque à ta bibliothèque.</p><div><button className="secondary" onClick={onReset}>Réinitialiser</button><button className="primary" onClick={onCreate}><Plus size={17}/> Nouveau workflow</button></div></section>
+function EmptyState({ onReset, onCreate, onImport }) {
+  return <section className="empty"><Search size={28}/><h2>Aucun workflow trouvé</h2><p>Importe des workflows depuis un dépôt GitHub ou crée le premier workflow manuellement.</p><div><button className="secondary" onClick={onImport}><GitFork size={17}/> Importer depuis GitHub</button><button className="primary" onClick={onCreate}><Plus size={17}/> Nouveau workflow</button></div></section>
 }
