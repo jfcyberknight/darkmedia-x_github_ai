@@ -101,8 +101,10 @@ export default function App() {
     event.preventDefault()
     if (!supabase) return notify('Configure VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env.', 'info')
     const { error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword })
-    if (error) notify(error.message + ' — Vérifie que le compte existe dans Supabase (Authentication > Users > Add User).', 'error')
-    else notify('Connexion réussie.')
+    if (error) {
+      console.error('[Supabase auth error]', JSON.stringify({ message: error.message, status: error.status, code: error.code, name: error.name }, null, 2))
+      notify(error.message + ' — Vérifie que le compte existe dans Supabase (Authentication > Users > Add User).', 'error')
+    } else notify('Connexion réussie.')
   }
 
   async function signOut() {
